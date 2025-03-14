@@ -74,3 +74,21 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(o
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden")
 
     return user
+
+
+async def verify_user_email(token: str, db: AsyncSession = Depends(get_db)):
+    """Verify the user's email and activate their account."""
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid token",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        email = payload.get("sub")
+        if email is None:
+            raise credentials_exception
+    except JWTError:
+        raise credentials_exception
+

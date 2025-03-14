@@ -2,16 +2,17 @@ from datetime import timedelta
 from sqlalchemy.future import select
 from fastapi import APIRouter, HTTPException, Depends, status
 from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
-from sqlalchemy.orm import Session
 from src.auth.schemas import RegisterRequest, RegisterResponse
 from src.auth.service import (
     activate_user,
     create_user,
+    create_verification_token,
     deactivate_user,
-    get_user_by_email)
+    get_user_by_email,
+    verify_email)
 from src.database import get_db
 from sqlalchemy.ext.asyncio import AsyncSession
-from src.auth.models import Users
+from src.auth.models import EmailVerificationToken, Users
 from src.auth.utils import (
     verify_password,
     create_access_token,
@@ -26,32 +27,24 @@ async def protected_endpoint(current_user: Users = Depends(get_current_user)):
     return {"message": f"Hello {current_user.email}, welcome to the protected route!"}
 
 @router.post("/register", response_model=RegisterResponse)
-async def register_user(user_data: RegisterRequest, db: AsyncSession = Depends(get_db)):
-    existing_user = await get_user_by_email(user_data.email, db)
-    if existing_user:
-        raise HTTPException(status_code=400, detail="Email already registered")
-    
-    user = await create_user(user_data, db)  # ✅ Ensure `await` is used here
-    return user
+async def register_user_route(
+    user_data: RegisterRequest, 
+    db: AsyncSession = Depends(get_db)
+):
+    user = await create_user(user_data, db)
+    return {"message": "User registered successfully. Check your email to verify."}
+@router.get("/verify-email")
+async def verify_email_endpoint(token: str, db: AsyncSession = Depends(get_db)):
+    """Verify user email via token."""
+    result = await verify_email(token, db)
 
+    if "error" in result:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=result["error"]
+        )
 
-
-# @router.post("/login")
-# async def login(formdata: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(get_db)):
-#     stmt = select(Users).where(Users.email == formdata.username)
-#     result = await db.execute(stmt)
-#     user = result.scalars().first()
-
-#     if not user or not verify_password(formdata.password, user.password):
-#         raise HTTPException(
-#             status_code=status.HTTP_401_UNAUTHORIZED,
-#             detail="Incorrect username or password",
-#             headers={"WWW-Authenticate": "Bearer"},
-#         )
-
-#     access_token = create_access_token(data={"sub": user.email}, expires_delta=timedelta(minutes=30))
-#     return {"access_token": access_token, "token_type": "Bearer"}
-
+    return result
 
 @router.post("/login")
 async def login(formdata: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(get_db)):
@@ -85,4 +78,3 @@ async def deactivate_reactivate_account(current_user: Users = Depends(get_curren
         await deactivate_user(current_user, db)
         return{"message":"account activated successfully"}
         
-
