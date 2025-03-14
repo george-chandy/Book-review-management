@@ -17,5 +17,5 @@ class RegisterRequest(BaseModel):
     dob: date
 
 class RegisterResponse(BaseModel):
-    email: str
-    # message: str
+    # email: str
+    message: str
