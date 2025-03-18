@@ -6,7 +6,7 @@ class BookreviewException(HTTPException):
     DETAIL = "Internal Server Error"
     
     def __init__(self, **kwargs: dict[str, Any]) -> None:
-        super().__init__(status_code=self.STATUS_CODE, detail=self.DETAIL, **kwargs)
+        super().__init__(status_code=self.status_code, detail=self.DETAIL, **kwargs)
 
 class BadRequest(BookreviewException):
     status_code = status.HTTP_400_BAD_REQUEST
