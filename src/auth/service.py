@@ -3,30 +3,22 @@ from fastapi import HTTPException,status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from passlib.context import CryptContext
-from src.auth.models import EmailVerificationToken, Users
+from src.auth.models import EmailVerificationToken, PasswordResetToken, Users
 from src.auth.schemas import RegisterRequest
 from src.mail import send_email
 from src.auth.models import EmailVerificationToken
-from src.auth.utils import create_access_token
+from src.auth.utils import create_access_token, delete_reset_token
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import timedelta
 import uuid
 from src.mail import send_email
-from sqlalchemy import text
+from sqlalchemy import delete, text
+from src.database import SessionLocal
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 async def create_user(user_data, db: AsyncSession):
     # ✅ Check if email already exists
-    stmt = select(Users).where(Users.email == user_data.email)
-    result = await db.execute(stmt)
-    existing_user = result.scalars().first()
-
-    if existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already registered"
-        )
 
     hashed_password = pwd_context.hash(user_data.password)
     user = Users(
@@ -45,6 +37,7 @@ async def create_user(user_data, db: AsyncSession):
 
     # ✅ Create verification token and send email
     await create_verification_token(user, db)
+    return user
 
 async def create_verification_token(user, db: AsyncSession):
     token = str(uuid.uuid4())
@@ -65,7 +58,7 @@ async def create_verification_token(user, db: AsyncSession):
 
     # verification_link = f"http://localhost:8000/auth/verify-email?token={token}"
     # await send_email(user.email, "Verify Your Email", f"Click here to verify: {verification_link}")
-
+    
 
 
 
@@ -109,6 +102,26 @@ async def verify_email(token: str, db: AsyncSession):
 
     return {"message": "Email verified successfully"}
 
+async def create_reset_token(email: str, db: AsyncSession):
+    
+    user = await get_user_by_email(email, db)
+    stmt = select(PasswordResetToken).where(PasswordResetToken.user_id == user.id)
+    result = await db.execute(stmt)
+    existing_token = result.scalars().first()
 
+    if existing_token:
+        await delete_reset_token(user.id, db)
+    
+    token = str(uuid.uuid4())
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
 
+    reset_token = PasswordResetToken(
+        user_id=user.id,
+        token=token,
+        expires_at=expires_at
+    )
 
+    db.add(reset_token)
+    await db.commit()  # ✅ Await commit after add
+
+    return token

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, ConfigDict, EmailStr
 from datetime import date
 from enum import Enum
 
@@ -17,5 +17,18 @@ class RegisterRequest(BaseModel):
     dob: date
 
 class RegisterResponse(BaseModel):
-    # email: str
+    email: str
     message: str
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+class User(BaseModel):
+    id: int
+    first_name: str
+    last_name: str
+    email: str
+    phone: str
+
+    model_config = ConfigDict(from_attributes=True)
+
