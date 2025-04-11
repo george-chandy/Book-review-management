@@ -1,31 +1,8 @@
 from datetime import datetime
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 
-
-class Book(BaseModel):
-    title: str
-    author_id: int
-    category_id: int
-    genre_id: int
-    language_id: int
-    coverimage_url: Optional[str] = None
-    page_count: int
-    isbn: str
-    is_featured: Optional[bool] = False
-    is_published: Optional[bool] = False
-    average_rating: Optional[float] = 0.0
-
-class BookCreate(Book):
-    pass
-
-class BookResponse(Book):
-    id: int
-    created_at: datetime
-    
-    class Config:
-        from_attributes = True
-
+# --- Author ---
 class AuthorBase(BaseModel):
     name: str
 
@@ -34,10 +11,11 @@ class AuthorCreate(AuthorBase):
 
 class AuthorResponse(AuthorBase):
     id: int
-    
     class Config:
         from_attributes = True
 
+
+# --- Category ---
 class CategoryBase(BaseModel):
     name: str
 
@@ -46,10 +24,11 @@ class CategoryCreate(CategoryBase):
 
 class CategoryResponse(CategoryBase):
     id: int
-    
     class Config:
         from_attributes = True
 
+
+# --- Genre ---
 class GenreBase(BaseModel):
     name: str
 
@@ -58,10 +37,24 @@ class GenreCreate(GenreBase):
 
 class GenreResponse(GenreBase):
     id: int
-    
     class Config:
         from_attributes = True
 
+
+# --- Language ---
+class LanguageBase(BaseModel):
+    name: str
+
+class LanguageCreate(LanguageBase):
+    pass
+
+class LanguageResponse(LanguageBase):
+    id: int
+    class Config:
+        from_attributes = True
+
+
+# --- Review ---
 class ReviewBase(BaseModel):
     book_id: int
     user_id: int
@@ -74,18 +67,36 @@ class ReviewCreate(ReviewBase):
 class ReviewResponse(ReviewBase):
     id: int
     created_at: datetime
-    
     class Config:
         from_attributes = True
 
-class LanguageBase(BaseModel):
-    name: str
 
-class LanguageCreate(LanguageBase):
+# --- Book ---
+class BookBase(BaseModel):
+    title: str
+    author_id: int
+    category_id: int
+    genre_id: int
+    language_id: int
+    cover_image_url: Optional[str] = None
+    page_count: int
+    isbn: str
+    is_featured: Optional[bool] = False
+    is_published: Optional[bool] = False
+    average_rating: Optional[float] = 0.0
+    description: Optional[str] = None
+
+class BookCreate(BookBase):
     pass
 
-class LanguageResponse(LanguageBase):
+class BookResponse(BaseModel):
     id: int
-    
+    created_at: datetime
+    updated_at: Optional[datetime]
+    author: str
+    category: str
+    genre: str
+    language: str
+    reviews: List[ReviewResponse] = []  # Include all reviews
     class Config:
         from_attributes = True

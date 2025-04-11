@@ -1,0 +1,1 @@
+# auth_user_id for google or other third party authentication

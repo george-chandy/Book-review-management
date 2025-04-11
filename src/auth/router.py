@@ -1,4 +1,5 @@
 from datetime import timedelta
+from fastapi.responses import JSONResponse
 from passlib.context import CryptContext
 from fastapi import APIRouter, HTTPException, Depends, status, Response
 from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
@@ -14,7 +15,7 @@ from src.auth.service import (
     create_verification_token,
     deactivate_user,
     get_user_by_email,
-    verify_email)
+    verify_user_email)
 from src.database import get_db
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.auth.models import EmailVerificationToken, Users
@@ -46,7 +47,7 @@ from src.auth.exceptions import (
 )
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-router = APIRouter(prefix="/auth", tags=["Auth"])
+router = APIRouter(prefix="/auth", tags=["Auth"], default_response_class=JSONResponse)
 
 @router.get("/protected-route")
 async def protected_endpoint(current_user: Users = Depends(get_current_user)):
@@ -118,7 +119,7 @@ async def verify_email(token: str, db: AsyncSession = Depends(get_db)):
     if not is_valid_uuid(token):
         raise InvalidOrExpiredEmailTokenException()
     
-    result = await verify_email(token, db)
+    result = await verify_user_email(token, db)
 
     return result
 
@@ -130,11 +131,17 @@ async def deactivate_account(current_user: Users = Depends(get_current_user), db
     if user is None:
         raise EmailNotRegisteredException()
     
-    if not user.is_active:
-        await activate_user(current_user, db)
-        return {"message": "account activated successfully"}
     if user.is_active:
         await deactivate_user(current_user, db)
+        return{"message":"account deactivated successfully"}
+    
+@router.patch("/activate-account")
+async def activate_account(current_user: Users = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    user = await get_user_by_email(current_user.email, db)
+    if user is None:
+        raise EmailNotRegisteredException()
+    if not user.is_active:
+        await activate_user(current_user, db)
         return{"message":"account activated successfully"}
         
 @router.post("/forgot-password", status_code=status.HTTP_204_NO_CONTENT)

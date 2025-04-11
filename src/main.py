@@ -1,6 +1,8 @@
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 
 from src.auth.router import router as auth_router
+from src.admin.book_management.router import router as book_router
 
 
 app = FastAPI()
@@ -12,4 +14,5 @@ def status() -> str:
 
 
 app.include_router(auth_router)
+app.include_router(book_router)
 

@@ -1,6 +1,7 @@
 from uuid import UUID
 from dotenv import load_dotenv
-from fastapi import Depends, status, HTTPException
+from fastapi import Depends, status, HTTPException, Request
+from fastapi import HTTPException
 from sqlalchemy import delete
 from sqlalchemy.orm import Session
 from sqlalchemy.future import select
@@ -48,7 +49,7 @@ oauth2_scheme = HTTPBearer()
 
 from sqlalchemy.future import select  # Ensure correct import
 
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(oauth2_scheme), db: Session = Depends(get_db), request: Request = None,):
     """Extract user from token for authentication."""
     token = credentials.credentials  # Extract the actual token
     print(token)
@@ -72,9 +73,8 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(o
 
     if user is None:
         raise credentials_exception
-    if not user.is_active:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden")
-
+    if not user.is_active and request.url.path != "/auth/activate-account":
+        raise HTTPException(status_code=403, detail="Inactive user")
     return user
 
 

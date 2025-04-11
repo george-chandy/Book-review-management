@@ -18,7 +18,6 @@ from src.database import SessionLocal
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 async def create_user(user_data, db: AsyncSession):
-    # ✅ Check if email already exists
 
     hashed_password = pwd_context.hash(user_data.password)
     user = Users(
@@ -69,15 +68,16 @@ async def get_user_by_email(email: str, db: AsyncSession):
 
 async def deactivate_user(user: Users, db: AsyncSession) -> None:
     user.is_active = False
-    user.deactivated_at = datetime.now(timezone.utc)
+    user.deactivated_at = datetime.utcnow()
     await db.commit()
 
 async def activate_user(user: Users, db: AsyncSession):
     user.is_active = True
+    user.deactivated_at = None
     await db.commit()
     
 
-async def verify_email(token: str, db: AsyncSession):
+async def verify_user_email(token: str, db: AsyncSession):
     """Verify email using token."""
     stmt = select(EmailVerificationToken).where(EmailVerificationToken.token == token)
     result = await db.execute(stmt)

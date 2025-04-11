@@ -12,7 +12,7 @@ class Users(Base):
     first_name = Column(String, nullable=False)
     last_name = Column(String, nullable=False)
     phone = Column(String, nullable=False)
-    gender = Column(String, nullable=False)
+    gender = Column(gender_enum, nullable=False)
     dob = Column(DateTime, nullable=False)
     password = Column(String, nullable=False)
     email = Column(String, unique=True, nullable=False)
@@ -32,6 +32,10 @@ class Users(Base):
         cascade="all, delete-orphan",
         uselist=False
     )
+
+    reviews = relationship("Review", back_populates="user", cascade="all, delete-orphan")
+
+
 class EmailVerificationToken(Base):
     __tablename__ = "email_verification_token"
     
