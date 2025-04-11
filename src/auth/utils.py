@@ -1,6 +1,7 @@
 from uuid import UUID
 from dotenv import load_dotenv
 from fastapi import Depends, status, HTTPException
+from jose import JWTError
 from sqlalchemy import delete
 from sqlalchemy.orm import Session
 from sqlalchemy.future import select
@@ -8,10 +9,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi.security import HTTPBearer, OAuth2PasswordBearer
 from passlib.context import CryptContext
 from datetime import datetime, timedelta, timezone
-from jose import JWTError, jwt
+# from jose import JWTError, jwt
 import os
 from src.auth.models import PasswordResetToken, Users
+from src.auth.config import config
 from src.database import get_db
+from src.mail import send_email
+from src.auth.schemas import TokenData,TokenType
+from src.auth.exceptions import JwtTokenExpiredException
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy.future import select 
 
 load_dotenv()
 SECRET_KEY = os.getenv("SECRET_KEY")
@@ -33,6 +40,7 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None):
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
+
 def verify_access_token(token: str):
     """Verify and decode a JWT token."""
     try:
@@ -40,13 +48,10 @@ def verify_access_token(token: str):
         return payload  # Extract user info
     except JWTError:
         return None  # Invalid token
-
-
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+    
 
 oauth2_scheme = HTTPBearer()
 
-from sqlalchemy.future import select  # Ensure correct import
 
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     """Extract user from token for authentication."""
@@ -116,18 +121,12 @@ def is_valid_email(email: str) -> bool:
 
 from datetime import datetime, timedelta, timezone
 import re
-from typing import Dict
+from typing import Dict, Optional
 from uuid import UUID
 
 import bcrypt
 from fastapi_mail import MessageSchema, MessageType
 import jwt
-
-# from src.auth.config import config
-# from src.auth.exceptions import JwtTokenExpiredException
-# from src.auth.models import User
-# from src.auth.schemas import TokenData, TokenType, UserRole
-# from src.mail import send_email
 
 
 def is_valid_email(email: str) -> bool:
@@ -171,17 +170,97 @@ def is_valid_uuid(uuid, version=4):
     return str(uuid_obj) == uuid
 
 
-# def create_access_token(user_id, role: UserRole) -> str:
-#     current_time = datetime.now(timezone.utc)
-#     expiry_time = current_time + timedelta(minutes=config.JWT_ACCESS_EXPIRY_MINUTES)
-#     payload = {
-#         "sub": str(user_id),
-#         "role": role.value,
-#         "iat": current_time,
-#         "exp": expiry_time,
-#         "aud": config.JWT_AUDIENCE,
-#         "iss": config.JWT_ISSUER,
-#         "type": TokenType.ACCESS.value,
-#     }
-#     return jwt.encode(payload, config.JWT_ACCESS_SECRET, algorithm="HS256")
+async def send_verification_email(user_id: int, session: AsyncSession):
+    """Fetch user details from the database and send a verification email."""
+    
+    result = await session.execute(select(Users).where(Users.id == user_id))
+    user = result.scalars().first()
 
+    if not user:
+        return {"error": "User not found"}
+
+    verification_token = user.verification_token  
+
+    subject = "Verify Your Email Address with book review app"
+    body = f"""
+    Dear {user.first_name} {user.last_name},
+
+    Thank you for joining the Book Review App! We're thrilled to have you in our community of book lovers. 
+
+    To complete your registration and start exploring book reviews, please verify your email address by clicking the link below:
+
+    {config.HOST_ADDRESS}/verify-email?token={verification_token}
+
+
+    {config.HOST_ADDRESS}/verify-email?token={verification_token}
+    """
+
+    message = MessageSchema(
+        recipients=[user.email], subject=subject, body=body, subtype=MessageType.plain
+    )
+
+    await send_email(message=message)
+
+    return {"message": "Verification email sent successfully"}
+
+
+def create_refresh_token(user_id: str) -> str:
+    """Generate a refresh token with a longer expiration time."""
+    payload = {
+        "sub": user_id,  # User ID as subject
+        "exp": datetime.utcnow() + timedelta(days=config.JWT_REFRESH_EXPIRY_DAYS),
+        "iat": datetime.utcnow(),
+        "iss": config.JWT_ISSUER,
+        "aud": config.JWT_AUDIENCE,
+        "type": "refresh"
+    }
+    
+    return jwt.encode(payload, config.JWT_REFRESH_SECRET, algorithm="HS256")
+
+
+
+def create_access_token(user_id) -> str:
+    current_time = datetime.now(timezone.utc)
+    expiry_time = current_time + timedelta(minutes=config.JWT_ACCESS_EXPIRY_MINUTES)
+    payload = {
+        "sub": str(user_id),
+        "iat": current_time,
+        "exp": expiry_time,
+        "aud": config.JWT_AUDIENCE,
+        "iss": config.JWT_ISSUER,
+        "type": TokenType.ACCESS.value,
+    }
+    return jwt.encode(payload, config.JWT_ACCESS_SECRET, algorithm="HS256")
+
+
+def validate_and_decode_token(token: str, token_type: TokenType) -> TokenData | None:
+    """
+    Returns: token data if token is valid else return None.
+    Exception: JwtTokenExpiredException <- if token is expired
+    """
+
+    secrets = {
+        TokenType.ACCESS: config.JWT_ACCESS_SECRET,
+        TokenType.REFRESH: config.JWT_REFRESH_SECRET,
+    }
+
+    try:
+        payload: Dict = jwt.decode(
+            token,
+            secrets[token_type],
+            ["HS256"],
+            audience=config.JWT_AUDIENCE,
+            issuer=config.JWT_ISSUER,
+        )
+
+        user_id = payload.get("sub") 
+        if not user_id:
+            return None  
+
+        return TokenData(user_id=int(user_id))  
+    except jwt.exceptions.ExpiredSignatureError:
+        raise JwtTokenExpiredException()
+    except jwt.exceptions.InvalidTokenError:
+        return None
+    except Exception:
+        return None
