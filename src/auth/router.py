@@ -1,39 +1,60 @@
 from datetime import timedelta
 from passlib.context import CryptContext
-from fastapi import APIRouter, HTTPException, Depends, status, Response
+from fastapi import APIRouter, HTTPException, Depends, status,Request,Response
 from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
 from src.auth.schemas import (
     ForgotPasswordRequest,
+    LoginResponse,
     RegisterRequest,
     RegisterResponse,
-    User)
+    ResendVerificationMailRequest,
+    ResetPasswordRequest,
+    RefreshTokenResponse,
+    TokenType,
+    User,
+    UserResponse)
 from src.auth.service import (
     activate_user,
     create_reset_token,
     create_user,
     create_verification_token,
     deactivate_user,
+    delete_email_token,
+    delete_email_tokens,
+    delete_password_tokens,
     get_user_by_email,
-    verify_email)
+    get_user_by_id,
+    get_user_id_by_password_token,
+    mark_email_verified,
+    update_user_password,
+    verify_the_email)
 from src.database import get_db
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.auth.models import EmailVerificationToken, Users
 from src.auth.utils import (
+    create_refresh_token,
+    hash_password,
     is_password_complex,
     is_valid_email,
     is_valid_phone,
     is_valid_uuid,
+    validate_and_decode_token,
     verify_password,
     create_access_token,
-    get_current_user
+    get_current_user,
+    send_verification_email
 )
 from src.auth.exceptions import (
     EmailAlreadyRegisteredException,
     EmailNotRegisteredException,
     EmailRequiredException,
     IncorrectOldPasswordException,
+    InvalidEmailException,
     InvalidEmailFormatException,
+    InvalidOrExpiredResetTokenException,
+    InvalidOrExpiredTokenException,
     InvalidPhoneFormatException,
+    JwtTokenExpiredException,
     NewPasswordRequiredException,
     PasswordRequiredException,
     InvalidCredentialsException,
@@ -42,7 +63,9 @@ from src.auth.exceptions import (
     PhoneRequiredException,
     FirstNameRequiredException,
     LastNameRequiredException,
-    InvalidOrExpiredEmailTokenException
+    InvalidOrExpiredEmailTokenException,
+    RefreshTokenRequiredException,
+    ResetTokenRequiredException
 )
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -54,7 +77,7 @@ async def protected_endpoint(current_user: Users = Depends(get_current_user)):
     return {"message": f"Hello {current_user.email}, welcome to the protected route!"}
 
 @router.post("/login")
-async def login(formdata: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(get_db)):
+async def login(formdata: OAuth2PasswordRequestForm = Depends() ,db: AsyncSession = Depends(get_db)):
     user = await get_user_by_email(formdata.username, db)
     
     if not formdata.username:
@@ -69,9 +92,64 @@ async def login(formdata: OAuth2PasswordRequestForm = Depends(), db: AsyncSessio
     if not user or not verify_password(formdata.password, user.password):
         raise InvalidCredentialsException
 
-    access_token = create_access_token(data={"sub": user.email}, expires_delta=timedelta(minutes=30))
+    access_token = create_access_token(user.id)
+    refresh_token = create_refresh_token(user.id)
+    
+    # access_token={"access_token": access_token, "token_type": "Bearer"}
+    
+    response = Response()
 
-    return {"access_token": access_token, "token_type": "Bearer"}
+    response.set_cookie(
+        key="refresh_token",
+        value=refresh_token,
+        httponly=True,
+        secure=True,
+        samesite="strict",
+        path="/auth/refresh-token",
+    )
+
+    user = User.model_validate(user)
+    return LoginResponse(access_token=access_token, user=user)
+
+
+
+# @router.post("/login")
+# async def login(formdata: OAuth2PasswordRequestForm = Depends() ,db: AsyncSession = Depends(get_db)):
+#     user = await get_user_by_email(formdata.username, db)
+    
+#     if not formdata.username:
+#         raise EmailRequiredException()
+    
+#     if not formdata.password:
+#         raise PasswordRequiredException()
+    
+#     if not user.is_email_verified:
+#         raise EmailNotVerifiedException
+    
+#     if not user or not verify_password(formdata.password, user.password):
+#         raise InvalidCredentialsException
+
+#     access_token = create_access_token(user.id)
+#     refresh_token = create_refresh_token(user.id)
+    
+#     # access_token={"access_token": access_token, "token_type": "Bearer"}
+    
+#     response = Response()
+
+#     response.set_cookie(
+#         key="refresh_token",
+#         value=refresh_token,
+#         httponly=True,
+#         secure=True,
+#         samesite="strict",
+#         path="/auth/refresh-token",
+#     )
+
+#     user = User.model_validate(user)
+#     # return LoginResponse(access_token=access_token, user=user)
+#     return LoginResponse(access_token=access_token, user=UserResponse)
+
+
 
 @router.post("/register", response_model=RegisterResponse)
 async def register_user(
@@ -113,12 +191,12 @@ async def register_user(
     user = User.model_validate(user.__dict__)
     return RegisterResponse(email=user_data.email, message="verify mail id")
 
-@router.get("/verify-email", status_code=status.HTTP_204_NO_CONTENT)
+@router.get("/verify-email")
 async def verify_email(token: str, db: AsyncSession = Depends(get_db)):
     if not is_valid_uuid(token):
         raise InvalidOrExpiredEmailTokenException()
     
-    result = await verify_email(token, db)
+    result = await verify_the_email(token, db)  # ✅ Call the correct function
 
     return result
 
@@ -170,3 +248,80 @@ async def change_password(old_password:str, new_password:str, current_user: User
     user.password = hashed_password
     await db.commit()
     return {"message": "password changed successfully"}
+
+
+@router.post("/resend-verification-mail")
+async def resend_verification_email(resend_request:ResendVerificationMailRequest,db:AsyncSession=Depends(get_db)):
+  
+    if not is_valid_email(resend_request.email):
+        raise InvalidEmailException()
+  
+    user = await get_user_by_email(resend_request.email, db)
+  
+    if not user:
+       raise EmailNotRegisteredException()
+
+    if user.is_email_verified:
+       raise EmailNotVerifiedException()
+    
+    delete_email_token(db,user.id)
+    token=create_verification_token(db,user.id)
+    await send_verification_email(user,token)
+    return {"message": "A new verification email has been sent."}
+
+
+@router.post("/reset-password")
+async def reset_user_password(reset_request: ResetPasswordRequest, db: AsyncSession = Depends(get_db)):
+
+    if not reset_request.reset_token:
+        raise ResetTokenRequiredException()
+
+    if not reset_request.new_password:
+        raise PasswordRequiredException()
+
+    if not is_password_complex(reset_request.new_password):
+        raise PasswordTooWeakException()
+
+    user_id = await get_user_id_by_password_token(db, reset_request.reset_token)
+    if not user_id:
+        raise InvalidOrExpiredResetTokenException()
+
+    hashed_password = hash_password(reset_request.new_password)
+    
+    await update_user_password(db, user_id, hashed_password)
+    await mark_email_verified(db, user_id)
+    await delete_email_tokens(db, user_id)
+    await delete_password_tokens(db, user_id)
+    
+
+# @router.post("/login")
+# async def login(formdata: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(get_db)):
+#     user = await get_user_by_email(formdata.username, db)
+    
+#     if not user or not verify_password(formdata.password, user.password):
+#         raise InvalidCredentialsException
+
+#     access_token = create_access_token(user.id)
+
+#     user_response = UserResponse.model_validate(user)
+
+#     return LoginResponse(access_token=access_token, user=user_response)
+
+
+@router.post("/refresh-token")
+async def refresh_token(request: Request) -> RefreshTokenResponse:
+    refresh_token = request.cookies.get("refresh_token")
+    if not refresh_token:
+        raise RefreshTokenRequiredException()
+
+    try:
+        token_data = validate_and_decode_token(refresh_token, TokenType.REFRESH)
+    except JwtTokenExpiredException:
+        raise InvalidOrExpiredTokenException()
+
+    if not token_data:
+        raise InvalidOrExpiredTokenException()
+
+    access_token = create_access_token(token_data.user_id)
+    return RefreshTokenResponse(access_token=access_token)
+
